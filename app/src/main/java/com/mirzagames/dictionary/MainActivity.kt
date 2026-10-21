@@ -28,8 +28,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                DictionaryScreen()
+            MaterialTheme(colorScheme = lightColorScheme()) {
+                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                    DictionaryScreen()
+                }
             }
         }
     }
@@ -45,7 +47,8 @@ fun fetchWord(word: String): WordResult? {
     conn.connectTimeout = 10000
     conn.readTimeout = 10000
     try {
-        if (conn.responseCode != 200) return null
+        if (conn.responseCode == 404) return null
+        if (conn.responseCode != 200) throw Exception("server returned HTTP ${conn.responseCode}")
         val body = conn.inputStream.bufferedReader().use { it.readText() }
         val entry = JSONArray(body).getJSONObject(0)
         val meanings = mutableListOf<Meaning>()
@@ -92,7 +95,7 @@ fun DictionaryScreen() {
                 if (r == null) message = "No meaning found for \"$w\"."
                 else result = r
             } catch (e: Exception) {
-                message = "Could not look up the word. Check your internet connection."
+                message = "Lookup failed: ${e.message ?: "unknown error"}. Check internet and try again."
             }
             loading = false
         }
@@ -100,6 +103,7 @@ fun DictionaryScreen() {
 
     Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("Dictionary", fontSize = 28.sp, fontWeight = FontWeight.Bold)
+        Text("by Abuzarr", fontSize = 14.sp)
         Spacer(Modifier.height(12.dp))
 
         Row(verticalAlignment = Alignment.CenterVertically) {
