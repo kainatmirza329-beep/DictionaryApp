@@ -20,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
+import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -40,8 +41,54 @@ class MainActivity : ComponentActivity() {
 data class Meaning(val partOfSpeech: String, val definitions: List<String>, val example: String?)
 data class WordResult(val word: String, val phonetic: String, val meanings: List<Meaning>)
 
-// Returns null if the word is not found
+// Tries the free dictionary first, then Wiktionary (much wider word coverage).
+// Returns null if no source has the word.
 fun fetchWord(word: String): WordResult? {
+    val primary = try { fetchFromFreeDictionary(word) } catch (e: Exception) { null }
+    return primary ?: fetchFromWiktionary(word)
+}
+
+fun cleanHtml(s: String): String =
+    s.replace(Regex("<[^>]*>"), "")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
+        .trim()
+
+fun fetchFromWiktionary(word: String): WordResult? {
+    val path = URLEncoder.encode(word.trim().lowercase(), "UTF-8").replace("+", "%20")
+    val url = URL("https://en.wiktionary.org/api/rest_v1/page/definition/$path")
+    val conn = url.openConnection() as HttpURLConnection
+    conn.connectTimeout = 10000
+    conn.readTimeout = 10000
+    conn.setRequestProperty("User-Agent", "DictionaryApp/1.0 (Android)")
+    try {
+        if (conn.responseCode == 404) return null
+        if (conn.responseCode != 200) throw Exception("server returned HTTP ${conn.responseCode}")
+        val body = conn.inputStream.bufferedReader().use { it.readText() }
+        val arr = JSONObject(body).optJSONArray("en") ?: return null
+        val meanings = mutableListOf<Meaning>()
+        for (i in 0 until arr.length()) {
+            val m = arr.getJSONObject(i)
+            val defs = m.getJSONArray("definitions")
+            val list = mutableListOf<String>()
+            var example: String? = null
+            for (j in 0 until defs.length()) {
+                val d = defs.getJSONObject(j)
+                list.add(cleanHtml(d.getString("definition")))
+                val ex = d.optJSONArray("examples")
+                if (example == null && ex != null && ex.length() > 0) example = cleanHtml(ex.getString(0))
+            }
+            meanings.add(Meaning(m.getString("partOfSpeech"), list, example))
+        }
+        if (meanings.isEmpty()) return null
+        return WordResult(word.trim(), "", meanings)
+    } finally {
+        conn.disconnect()
+    }
+}
+
+fun fetchFromFreeDictionary(word: String): WordResult? {
     val url = URL("https://api.dictionaryapi.dev/api/v2/entries/en/" + URLEncoder.encode(word, "UTF-8"))
     val conn = url.openConnection() as HttpURLConnection
     conn.connectTimeout = 10000
